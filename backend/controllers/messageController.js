@@ -1,52 +1,88 @@
 const { clerkClient } = require('@clerk/clerk-sdk-node');
 
-const handleMessage = async (req, res) => {
+// In-memory messages store for demo purposes.
+const messages = new Map();
+
+/**
+ * Handle incoming messages
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {Function} next - Next middleware function
+ */
+const handleMessage = async (req, res, next) => {
   try {
     const { message } = req.body;
+    
+    if (!message || typeof message !== 'string' || message.trim() === '') {
+      return res.status(400).json({ 
+        error: 'Message is required and must be a non-empty string' 
+      });
+    }
+
+    // Get user info from Clerk
     const { userId } = req.auth;
-
-    if (!message || typeof message !== 'string') {
-      return res.status(400).json({ message: 'A valid message is required' });
-    }
-
     if (!userId) {
-      return res.status(401).json({ message: 'Authentication required' });
+      return res.status(401).json({ error: 'Authentication required' });
     }
 
-    // Get user details from Clerk
     const user = await clerkClient.users.getUser(userId);
-    const username = user.username || user.firstName || 'User';
-    const email = user.emailAddresses[0]?.emailAddress || 'No email';
+    const username = user.username || user.firstName || 'Anonymous';
 
-    // Process the message (this is where you'd add your business logic)
-    const timestamp = new Date().toISOString();
-    const reply = `Hello ${username}, you said: "${message}" at ${new Date(timestamp).toLocaleString()}`;
+    // Create message with user info
+    const newMessage = {
+      id: Date.now().toString(),
+      text: message.trim(),
+      userId,
+      username,
+      timestamp: new Date().toISOString(),
+      reply: `Echo: ${message} (from ${username})`
+    };
 
-    // Log the message (in a real app, you might save this to a database)
-    console.log(`[${timestamp}] Message from ${username} (${email}): ${message}`);
+    // Store message (in-memory for demo)
+    messages.set(newMessage.id, newMessage);
 
+    // Return the reply
     res.status(200).json({ 
-      success: true, 
-      message: 'Message processed successfully', 
-      data: { 
-        originalMessage: message, 
-        reply,
-        user: {
-          id: userId,
-          username,
-          email
-        },
-        timestamp
-      }
+      success: true,
+      reply: newMessage.reply,
+      timestamp: newMessage.timestamp
     });
   } catch (error) {
-    console.error('Error processing message:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to process message',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
-    });
+    console.error('Message processing error:', error);
+    next(error);
   }
 };
 
-module.exports = { handleMessage };
+/**
+ * Get all messages (for debugging)
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ */
+const getAllMessages = (req, res) => {
+  res.status(200).json({
+    count: messages.size,
+    messages: Array.from(messages.values())
+  });
+};
+
+/**
+ * Get a specific message by ID (for debugging)
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ */
+const getMessageById = (req, res) => {
+  const { id } = req.params;
+  const message = messages.get(id);
+  
+  if (!message) {
+    return res.status(404).json({ error: 'Message not found' });
+  }
+  
+  res.status(200).json(message);
+};
+
+module.exports = {
+  handleMessage,
+  getAllMessages,
+  getMessageById
+};

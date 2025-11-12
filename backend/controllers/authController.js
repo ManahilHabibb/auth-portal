@@ -1,35 +1,50 @@
-const { clerkClient } = require('@clerk/clerk-sdk-node');
+const express = require('express');
+const router = express.Router();
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
 
-const getProfile = async (req, res) => {
+// Simple in-memory users store for demo purposes.
+// Replace with database for production.
+const users = [];
+
+/**
+ * POST /api/auth/register
+ * body: { username, password }
+ */
+router.post('/register', async (req, res, next) => {
   try {
-    const { userId } = req.auth;
-
-    if (!userId) {
-      return res.status(401).json({ message: 'User authentication required' });
+    const { username, password } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ error: 'username and password are required' });
     }
-
-    const user = await clerkClient.users.getUser(userId);
-
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
+    if (users.find(u => u.username === username)) {
+      return res.status(409).json({ error: 'User already exists' });
     }
-
-    const primaryEmail = user.primaryEmailAddress?.emailAddress ?? user.emailAddresses?.[0]?.emailAddress ?? '';
-
-    res.status(200).json({
-      user: {
-        id: user.id,
-        username: user.username,
-        email: primaryEmail,
-        createdAt: user.createdAt,
-      },
-    });
-  } catch (error) {
-    console.error('Profile fetch error:', error);
-    res.status(500).json({ message: 'Failed to fetch profile data' });
+    const hashed = await bcrypt.hash(password, 10);
+    const user = { id: users.length + 1, username, password: hashed };
+    users.push(user);
+    res.status(201).json({ id: user.id, username: user.username });
+  } catch (err) {
+    next(err);
   }
-};
+});
 
-module.exports = {
-  getProfile,
-};
+/**
+ * POST /api/auth/login
+ * body: { username, password }
+ */
+router.post('/login', async (req, res, next) => {
+  try {
+    const { username, password } = req.body;
+    const user = users.find(u => u.username === username);
+    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+    const ok = await bcrypt.compare(password, user.password);
+    if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
+    const token = jwt.sign({ sub: user.id, username: user.username }, process.env.JWT_SECRET || 'dev-secret', { expiresIn: '1h' });
+    res.json({ token, user: { id: user.id, username: user.username } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+module.exports = router;

@@ -1,8 +1,7 @@
 const express = require('express');
 const router = express.Router();
+const { clerkClient } = require('@clerk/clerk-sdk-node');
 const { ClerkExpressRequireAuth } = require('@clerk/clerk-sdk-node');
-
-const { getProfile } = require('../controllers/authController');
 
 /**
  * @route   GET /api/auth/profile
@@ -10,39 +9,72 @@ const { getProfile } = require('../controllers/authController');
  * @access  Private
  * @returns {Object} User profile data
  */
-router.get('/profile', ClerkExpressRequireAuth(), getProfile);
+router.get('/profile', ClerkExpressRequireAuth(), async (req, res, next) => {
+  try {
+    const { userId } = req.auth;
+    
+    if (!userId) {
+      return res.status(401).json({ error: 'User not authenticated' });
+    }
+
+    const user = await clerkClient.users.getUser(userId);
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const profile = {
+      id: user.id,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      username: user.username,
+      email: user.emailAddresses?.[0]?.emailAddress,
+      imageUrl: user.imageUrl,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt
+    };
+
+    res.status(200).json(profile);
+  } catch (error) {
+    console.error('Profile fetch error:', error);
+    next(error);
+  }
+});
 
 // Webhook endpoint for Clerk
 router.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
-  // Clerk will send webhook events here
-  // You can handle user.created, user.updated, etc. events
-  const event = req.body;
-  
-  console.log('Received webhook event:', event.type);
-  
-  // Process the webhook event
-  switch (event.type) {
-    case 'user.created':
-      console.log('User created:', event.data);
-      // Handle user creation in your database
-      break;
-      
-    case 'user.updated':
+  try {
+    // Clerk will send webhook events here
+    // You can handle user.created, user.updated, etc. events
+    const event = req.body;
+    
+    // Verify the webhook signature here if needed
+    // const evt = clerkClient.webhooks.verifyWebhook({
+    //   payload: req.body,
+    //   header: req.headers,
+    //   secret: process.env.CLERK_WEBHOOK_SECRET
+    // });
+    
+    console.log('Received webhook event:', event);
+    
+    // Process the event
+    if (event.type === 'user.created') {
+      console.log('New user created:', event.data);
+      // Handle new user creation in your database
+    } else if (event.type === 'user.updated') {
       console.log('User updated:', event.data);
       // Handle user updates in your database
-      break;
-      
-    case 'user.deleted':
+    } else if (event.type === 'user.deleted') {
       console.log('User deleted:', event.data);
       // Handle user deletion in your database
-      break;
-      
-    default:
-      console.log('Unhandled event type:', event.type);
+    }
+    
+    // Respond quickly to prevent timeouts
+    res.json({ received: true });
+  } catch (error) {
+    console.error('Webhook error:', error);
+    res.status(400).json({ error: 'Webhook error' });
   }
-  
-  // Return a response to acknowledge receipt of the event
-  res.json({ received: true });
 });
 
 // Public route to get basic app info
