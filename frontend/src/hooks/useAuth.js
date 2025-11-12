@@ -1,4 +1,3 @@
-import { useContext } from 'react';
-import { AuthContext } from '../context/AuthContext';
+import { useAuth as useClerkAuth } from '@clerk/clerk-react';
 
-export const useAuth = () => useContext(AuthContext);
+export const useAuth = () => useClerkAuth();
